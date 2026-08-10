@@ -1,0 +1,80 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every cell here was verified to resolve and pass locally before being
+        # committed. Laravel 12 requires PHP ^8.2; Laravel 13 requires PHP ^8.3.
+        php: ['8.2', '8.3', '8.4', '8.5']
+        laravel: ['12.*', '13.*']
+        dependency-version: [prefer-stable]
+        include:
+          - laravel: '12.*'
+            testbench: '10.*'
+          - laravel: '13.*'
+            testbench: '11.*'
+          # Lowest-bound run, so an under-constrained dependency fails here rather
+          # than in somebody's application.
+          - php: '8.2'
+            laravel: '12.*'
+            testbench: '10.*'
+            dependency-version: prefer-lowest
+        exclude:
+          # Laravel 13 requires PHP ^8.3.
+          - laravel: '13.*'
+            php: '8.2'
+
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / ${{ matrix.dependency-version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, openssl, posix, fileinfo
+          ini-values: error_reporting=E_ALL
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache/files
+          key: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.dependency-version }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ matrix.php }}-${{ matrix.laravel }}-
+
+      - name: Install dependencies
+        run: |
+          composer require --no-interaction --no-update \
+            "illuminate/console:${{ matrix.laravel }}" \
+            "illuminate/contracts:${{ matrix.laravel }}" \
+            "illuminate/http:${{ matrix.laravel }}" \
+            "illuminate/support:${{ matrix.laravel }}"
+          composer require --dev --no-interaction --no-update \
+            "orchestra/testbench:${{ matrix.testbench }}"
+          composer update --${{ matrix.dependency-version }} --prefer-dist --no-interaction
+
+      - name: Show resolved versions
+        run: composer show --direct
+
+      - name: Run tests
+        run: vendor/bin/pest --ci

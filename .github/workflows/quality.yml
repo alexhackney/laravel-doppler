@@ -1,0 +1,84 @@
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pint:
+    runs-on: ubuntu-latest
+    name: code style
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      - run: vendor/bin/pint --test
+
+  phpstan:
+    runs-on: ubuntu-latest
+    name: static analysis
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      # Level 8, no baseline. --memory-limit is required: the default 128M is not
+      # enough for larastan on this codebase.
+      - run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+
+  coverage:
+    runs-on: ubuntu-latest
+    name: coverage
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, curl, libxml, mbstring, zip, openssl, posix, fileinfo
+          coverage: xdebug
+      - run: composer install --prefer-dist --no-interaction
+      - run: vendor/bin/pest --ci --coverage --min=80
+
+  audit:
+    runs-on: ubuntu-latest
+    name: security audit
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      # Fails when any installed dependency has a published advisory. This is what
+      # caught Laravel 11 being permanently unpatchable.
+      - run: composer audit --no-interaction
+
+  validate:
+    runs-on: ubuntu-latest
+    name: composer.json
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer validate --strict

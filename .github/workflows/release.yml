@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+
+    steps:
+      # Maintains a standing "chore: release X.Y.Z" pull request, computing the version
+      # from conventional commit types since the last tag: feat -> minor, fix -> patch,
+      # a ! or BREAKING CHANGE -> major. Merging that PR creates the tag and the GitHub
+      # release. Packagist picks the tag up through its webhook, so merging the PR is
+      # the whole publish step.
+      #
+      # While the version is below 1.0, bump-minor-pre-major keeps a feat at 0.x and
+      # never promotes to 1.0 on its own. Going to 1.0 is deliberate: put
+      # "Release-As: 1.0.0" in a commit body when the API decoder has been confirmed
+      # against real Doppler.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  verify:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: verify ${{ needs.release-please.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, curl, libxml, mbstring, zip, openssl, posix, fileinfo
+          coverage: none
+
+      # The tag is already published at this point, so this is a canary rather than a
+      # gate: it says loudly if something shipped that does not install or does not pass.
+      # The real gate is branch protection on main, which is what the release PR merges into.
+      - run: composer validate --strict --no-check-lock
+      - run: composer install --prefer-dist --no-interaction
+      - run: vendor/bin/pest --ci
+
+      - name: Confirm the dist archive carries no development files
+        run: |
+          composer archive --format=tar --dir=/tmp --file=release-check
+          echo "--- archive contents ---"
+          tar -tf /tmp/release-check.tar | sed 's/^/  /'
+          if tar -tf /tmp/release-check.tar | grep -Ei '(^|/)(tests|\.github|docs)/'; then
+            echo "::error::Development files leaked into the dist archive. Check .gitattributes export-ignore rules."
+            exit 1
+          fi
+          echo "Archive is clean."

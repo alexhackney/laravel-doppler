@@ -1,0 +1,63 @@
+name: conventional commits
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    name: pull request title
+
+    steps:
+      # Releases are computed from commit subjects, so a malformed subject does not fail
+      # loudly: it silently produces the wrong version, or no release at all. On a squash
+      # merge the pull request title becomes that subject, which makes this the one place
+      # worth checking.
+      #
+      # Written inline rather than pulled from a third-party action: it is a regex, and a
+      # release-critical check should not be an unpinned dependency.
+      - name: Check the title is a conventional commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          PATTERN='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+
+          if [[ ! "$TITLE" =~ $PATTERN ]]; then
+            {
+              echo "::error::Pull request title is not a conventional commit."
+              echo ""
+              echo "Got:      $TITLE"
+              echo ""
+              echo "Expected: type(optional-scope): description"
+              echo ""
+              echo "Types that change the version:"
+              echo "  feat:              minor bump (0.x while below 1.0)"
+              echo "  fix:               patch bump"
+              echo "  feat!: or fix!:    major bump, or minor while below 1.0"
+              echo ""
+              echo "Types that do not release:"
+              echo "  docs, style, refactor, perf, test, build, ci, chore, revert"
+              echo ""
+              echo "Examples:"
+              echo "  feat: add a vault secret source"
+              echo "  fix(renderer): escape a dollar inside a double-quoted value"
+              echo "  feat(sources)!: rename the driver config key"
+            } >&2
+            exit 1
+          fi
+
+          echo "Title is valid: $TITLE"
+
+          if [[ "$TITLE" =~ ^(feat|fix) ]] || [[ "$TITLE" == *"!:"* ]]; then
+            echo "This pull request will trigger a release when merged."
+          else
+            echo "This pull request will not trigger a release on its own."
+          fi

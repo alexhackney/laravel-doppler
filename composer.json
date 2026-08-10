@@ -1,0 +1,78 @@
+{
+    "name": "alexhackney/laravel-doppler",
+    "description": "Render a Laravel .env from Doppler secrets safely, atomically, and with a round-trip guarantee",
+    "keywords": [
+        "laravel",
+        "doppler",
+        "secrets",
+        "secrets-management",
+        "env",
+        "dotenv",
+        "configuration",
+        "deployment"
+    ],
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/alexhackney/laravel-doppler",
+    "authors": [
+        {
+            "name": "Alex Hackney",
+            "email": "alex@alexhackney.com",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/alexhackney/laravel-doppler/issues",
+        "source": "https://github.com/alexhackney/laravel-doppler"
+    },
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "^12.0|^13.0",
+        "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/http": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0",
+        "vlucas/phpdotenv": "^5.4"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.13",
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0|^5.0",
+        "phpstan/phpstan": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "AlexHackney\\Doppler\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AlexHackney\\Doppler\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "AlexHackney\\Doppler\\DopplerServiceProvider"
+            ],
+            "aliases": {
+                "Doppler": "AlexHackney\\Doppler\\Facades\\Doppler"
+            }
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "test-coverage": "vendor/bin/pest --coverage",
+        "analyse": "vendor/bin/phpstan analyse --memory-limit=1G",
+        "format": "vendor/bin/pint"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
