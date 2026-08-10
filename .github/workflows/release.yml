@@ -33,7 +33,14 @@ jobs:
       # never promotes to 1.0 on its own. Going to 1.0 is deliberate: put
       # "Release-As: 1.0.0" in a commit body when the API decoder has been confirmed
       # against real Doppler.
-      - uses: googleapis/release-please-action@v4
+      #
+      # The bare outputs below (release_created, tag_name, version) are only set because
+      # this manifest has a single package at the root path ".", which release-please
+      # treats as a "root component". If a second package is ever added, every output
+      # becomes prefixed (".--release_created" and so on), the `if` on the verify job
+      # silently evaluates to false, and releases stop being checked without anything
+      # failing. Change both together or not at all.
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
@@ -47,7 +54,7 @@ jobs:
     name: verify ${{ needs.release-please.outputs.tag }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag }}
 
