@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0](https://github.com/alexhackney/laravel-doppler/compare/v0.1.0...v0.2.0) (2026-08-12)
 
+### Added
+
+* `doppler.validate.no_placeholder_ignore`, a list of keys exempt from the placeholder rule.
+  `NoPlaceholderRule` already accepted an ignore list, but `Validator::fromConfig()`
+  constructed it with no arguments and no config key fed it, so the only way to exempt a key
+  was to register a subclass through `validate.rules`
+  ([#1](https://github.com/alexhackney/laravel-doppler/issues/1))
+  ([7819848](https://github.com/alexhackney/laravel-doppler/commit/781984847bece102191c223444e936f8c35af11a)).
+
+### Changed
+
+* `env:diff` prints every validation problem with its consequence text, instead of only the
+  count. It is the command you schedule, so it is where the detail matters most: a count
+  with no keys leaves an operator with nothing to act on but a rerun. The header is worded
+  for a read-only command rather than reusing the exception message, which ends "Nothing was
+  written", and there is no `--force` advice because `env:diff` has no such flag.
+* `no_placeholder` no longer treats `null` or `none` as leftovers. phpdotenv resolves `null`
+  to a real null and Laravel's own `.env.example` ships `MAIL_ENCRYPTION=null` and
+  `REDIS_PASSWORD=null`; `SESSION_SAME_SITE=none` is a real setting. Both were refusing valid
+  configuration. A key that must not be blank belongs in `required`, where the consequence
+  text lives.
+
 
 ### Added
 
