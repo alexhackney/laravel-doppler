@@ -10,8 +10,6 @@
 /release-please-config.json     export-ignore
 /.release-please-manifest.json  export-ignore
 /CHANGELOG.md     export-ignore
-/.claude          export-ignore
-/CLAUDE.md        export-ignore
 /SECURITY.md      export-ignore
 /CONTRIBUTING.md  export-ignore
 
