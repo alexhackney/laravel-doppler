@@ -68,7 +68,11 @@ final class Validator
         }
 
         if (($config['no_placeholder'] ?? true) !== false) {
-            $rules[] = new NoPlaceholderRule;
+            $ignorePlaceholders = $config['no_placeholder_ignore'] ?? [];
+
+            $rules[] = new NoPlaceholderRule(
+                is_array($ignorePlaceholders) ? array_values($ignorePlaceholders) : [],
+            );
         }
 
         $matches = $config['matches'] ?? [];

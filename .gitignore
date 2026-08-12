@@ -14,3 +14,7 @@ Thumbs.db
 phpunit.xml
 !phpunit.xml.dist
 
+# Claude Code — local development context, never shipped
+/.claude/
+/CLAUDE.md
+

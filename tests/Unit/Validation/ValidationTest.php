@@ -163,6 +163,23 @@ describe('placeholders', function () {
     it('ignores keys it is told to skip', function () {
         expect((new NoPlaceholderRule(['SEED']))->check(['SEED' => 'changeme']))->toBe([]);
     });
+
+    it('takes its ignore list from config', function () {
+        $validator = Validator::fromConfig([
+            'no_placeholder_ignore' => ['SEED'],
+        ]);
+
+        expect($validator->validate(['SEED' => 'changeme']))->toBe([]);
+        expect($validator->validate(['OTHER' => 'changeme']))->toHaveCount(1);
+    });
+
+    it('accepts values Laravel gives meaning to, rather than reading them as leftovers', function (string $value) {
+        // MAIL_ENCRYPTION=null and REDIS_PASSWORD=null ship in Laravel's own .env.example,
+        // and SESSION_SAME_SITE=none is a real setting. phpdotenv resolves null to an
+        // actual null, so refusing these would be refusing the framework's spelling of
+        // "unset". A key that must not be blank is the required rule's job.
+        expect((new NoPlaceholderRule)->check(['K' => $value]))->toBe([]);
+    })->with(['null', 'NULL', 'none']);
 });
 
 describe('matches', function () {

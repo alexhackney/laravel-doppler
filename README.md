@@ -100,7 +100,7 @@ tabs, newlines, CRLF, UTF-8, PEM private keys, JSON, and 4KB values made entirel
 | Command | Does |
 |---|---|
 | `env:sync` | Render and write the env file |
-| `env:diff` | Report key-level drift. Exits 10 on drift. Safe to schedule |
+| `env:diff` | Report key-level drift. Exits 10 on drift. Safe to schedule. Exits 1 and names every offending key if Doppler's current secrets would not pass validation |
 | `env:doctor` | Diagnose the setup. No network, no secrets printed |
 | `env:snapshot` | Write an encrypted local fallback |
 
@@ -208,10 +208,18 @@ knowing what happened and knowing what it costs.
 | `not_loopback` | A public callback aimed at localhost. A third party bills you for work whose result never arrives |
 | `no_control_chars` | A stray `\r` from a paste, riding inside a credential |
 | `no_placeholder` | Values still reading `changeme`, `TODO`, `your-key-here` |
+| `no_placeholder_ignore` | Keys exempt from `no_placeholder`, for a legitimate value that happens to be one of those words |
 | `matches` | Regex, for values with a known shape |
 | `dynamic_secrets` | Doppler dynamic secrets, which carry a lease and expire |
 
-`--force` downgrades everything to a warning and writes anyway.
+`no_placeholder` matches exactly, and holds no value that means something in a Laravel
+`.env`. `null` is not treated as a leftover: phpdotenv resolves it to a real null, and
+Laravel's own `.env.example` ships `MAIL_ENCRYPTION=null` and `REDIS_PASSWORD=null`. Nor is
+`none`, on `SESSION_SAME_SITE=none`. A key that must not be blank belongs in `required`,
+where the consequence text lives.
+
+`--force` downgrades everything to a warning and writes anyway. `env:diff` has no `--force`,
+because it never writes; it prints the same per-key detail and exits 1.
 
 Set `'required' => 'env.example'` to derive the list from your committed `.env.example`
 instead, keeping the contract where developers already maintain it.

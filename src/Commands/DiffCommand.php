@@ -6,6 +6,7 @@ namespace AlexHackney\Doppler\Commands;
 
 use AlexHackney\Doppler\DopplerManager;
 use AlexHackney\Doppler\Exceptions\DopplerException;
+use AlexHackney\Doppler\Exceptions\ValidationFailed;
 use AlexHackney\Doppler\Support\ExitCode;
 use AlexHackney\Doppler\SyncOptions;
 use Illuminate\Console\Command;
@@ -55,6 +56,8 @@ final class DiffCommand extends Command
 
         try {
             $result = $doppler->dryRun($options);
+        } catch (ValidationFailed $e) {
+            return $this->reportValidationFailure($e);
         } catch (DopplerException $e) {
             $this->newLine();
             $this->error($e->getMessage());
@@ -87,6 +90,42 @@ final class DiffCommand extends Command
         $this->newLine();
 
         return ExitCode::DriftDetected->value;
+    }
+
+    /**
+     * Doppler answered, and the answer would not pass validation.
+     *
+     * The problems are printed in full, exactly as env:sync prints them. A count alone is
+     * useless from a scheduler: this is the command you run unattended, so the run that
+     * tells you something is wrong is the only place the detail is available without
+     * somebody reproducing it by hand through the facade.
+     *
+     * The header is worded for a read-only command rather than reusing the exception's own
+     * message, which ends "Nothing was written" and reads on env:diff as though a write had
+     * been attempted. No --force advice either, for the same reason: this command has no
+     * such flag.
+     */
+    private function reportValidationFailure(ValidationFailed $e): int
+    {
+        $count = count($e->problems);
+
+        $this->newLine();
+        $this->error(sprintf(
+            '%d validation problem%s would refuse the next env:sync.',
+            $count,
+            $count === 1 ? '' : 's',
+        ));
+        $this->newLine();
+
+        foreach ($e->problems as $problem) {
+            $this->line('  - '.$problem->describe());
+        }
+
+        $this->newLine();
+        $this->line('  Drift was not compared: validation refuses before the comparison is computed.');
+        $this->newLine();
+
+        return ExitCode::ValidationFailed->value;
     }
 
     private function stringOption(string $name): ?string
