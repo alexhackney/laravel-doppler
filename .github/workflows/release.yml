@@ -76,7 +76,7 @@ jobs:
           composer archive --format=tar --dir=/tmp --file=release-check
           echo "--- archive contents ---"
           tar -tf /tmp/release-check.tar | sed 's/^/  /'
-          if tar -tf /tmp/release-check.tar | grep -Ei '(^|/)(tests|\.github|docs)/'; then
+          if tar -tf /tmp/release-check.tar | grep -Ei '(^|/)(tests|\.github|docs|\.claude)/|(^|/)CLAUDE\.md$'; then
             echo "::error::Development files leaked into the dist archive. Check .gitattributes export-ignore rules."
             exit 1
           fi

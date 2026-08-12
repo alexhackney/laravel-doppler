@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AlexHackney\Doppler\Support\Diff;
 use AlexHackney\Doppler\Support\ExitCode;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -71,6 +72,38 @@ describe('env:diff', function () {
         Http::fake(['*' => Http::response([], 500)]);
 
         $this->artisan('env:diff')->assertExitCode(ExitCode::SourceUnavailable->value);
+    });
+
+    it('names every key a validation rule objected to', function () {
+        // This is the command you schedule, so it is the one where the detail matters most:
+        // a count with no keys leaves an operator with nothing to act on but a rerun.
+        file_put_contents($this->target, "APP_KEY='old'\n");
+
+        Http::fake(['*' => Http::response(['APP_KEY' => 'new', 'INTERNAL_SERVICE_TOKEN' => '', 'CALLBACK_URL' => ''])]);
+
+        config()->set('doppler.validate.required', [
+            'INTERNAL_SERVICE_TOKEN' => 'the auth middleware fails closed with 503',
+            'CALLBACK_URL' => 'the webhook receiver 404s',
+        ]);
+
+        $exitCode = Artisan::call('env:diff');
+        $output = Artisan::output();
+
+        expect($exitCode)->toBe(ExitCode::ValidationFailed->value);
+        expect($output)->toContain('INTERNAL_SERVICE_TOKEN');
+        expect($output)->toContain('the auth middleware fails closed with 503');
+        expect($output)->toContain('CALLBACK_URL');
+        expect($output)->toContain('the webhook receiver 404s');
+    });
+
+    it('does not offer --force, which it does not have', function () {
+        file_put_contents($this->target, "APP_KEY='old'\n");
+
+        Http::fake(['*' => Http::response(['SECRET_KEY' => 'changeme'])]);
+
+        Artisan::call('env:diff');
+
+        expect(Artisan::output())->not->toContain('--force');
     });
 });
 

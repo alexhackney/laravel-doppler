@@ -185,8 +185,21 @@ return [
 
         /*
          | Values still reading changeme, xxx, TODO, your-key-here.
+         |
+         | Matching is exact, and no value that means something in a Laravel .env is on the
+         | list: `null` is how phpdotenv spells an unset value and appears in Laravel's own
+         | .env.example, so it is not treated as a placeholder here.
          */
         'no_placeholder' => true,
+
+        /*
+         | Keys exempt from the placeholder rule, for the case where a legitimate value
+         | happens to be one of the words it looks for: a seed with a fixed known value, or
+         | a service whose sandbox credential really is the string "test".
+         */
+        'no_placeholder_ignore' => [
+            // 'STRIPE_TEST_SEED',
+        ],
 
         /*
          | Key => regex, for values with a known shape.

@@ -13,6 +13,16 @@ use AlexHackney\Doppler\Validation\Rule;
  * Matching is exact or near-exact rather than substring, because a real secret can legally
  * contain the letters "todo" and refusing a deploy over that would be worse than the
  * problem this catches.
+ *
+ * For the same reason the list holds no value that carries meaning in a Laravel .env.
+ * `null` is the obvious one: phpdotenv resolves it to a real null, Laravel's own
+ * .env.example ships `MAIL_ENCRYPTION=null` and `REDIS_PASSWORD=null`, and refusing those
+ * would be refusing the framework's documented way of saying "unset". `none` goes the same
+ * way, on `SESSION_SAME_SITE=none`. A key that genuinely must not be blank belongs in the
+ * required rule, which is where that contract is stated and where the consequence text
+ * lives.
+ *
+ * Keys exempt from the rule come from doppler.validate.no_placeholder_ignore.
  */
 final class NoPlaceholderRule implements Rule
 {
@@ -37,9 +47,7 @@ final class NoPlaceholderRule implements Rule
         'yourkeyhere',
         'secret',
         'password',
-        'null',
         'undefined',
-        'none',
         'replace-me',
         'replace_me',
         'fixme',
