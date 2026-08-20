@@ -38,17 +38,20 @@ final class Validator
      *
      * @param  array<string, mixed>  $config  The `validate` section of config/doppler.php.
      * @param  string|null  $basePath  Used to locate .env.example when required is set to that.
+     * @param  string  $grammar  The target grammar. Only `laravel` routes values through
+     *                           env(), which retypes `null` and `empty` into nothing.
      */
-    public static function fromConfig(array $config, ?string $basePath = null): self
+    public static function fromConfig(array $config, ?string $basePath = null, string $grammar = 'laravel'): self
     {
         $rules = [];
 
         $required = $config['required'] ?? [];
 
         if ($required === 'env.example') {
-            $rules[] = RequiredRule::fromExampleFile(rtrim($basePath ?? '', '/').'/.env.example');
+            $rules[] = RequiredRule::fromExampleFile(rtrim($basePath ?? '', '/').'/.env.example')
+                ->forGrammar($grammar);
         } elseif (is_array($required) && $required !== []) {
-            $rules[] = RequiredRule::fromConfig($required);
+            $rules[] = RequiredRule::fromConfig($required)->forGrammar($grammar);
         }
 
         $absoluteUrl = $config['absolute_url'] ?? [];

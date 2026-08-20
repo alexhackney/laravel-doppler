@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler\Commands;
 
+use AlexHackney\Doppler\Contracts\Doppler;
 use AlexHackney\Doppler\Credentials\Credential;
 use AlexHackney\Doppler\Credentials\TokenResolver;
-use AlexHackney\Doppler\DopplerManager;
 use AlexHackney\Doppler\Exceptions\DopplerException;
 use AlexHackney\Doppler\Support\ExitCode;
 use AlexHackney\Doppler\SyncOptions;
@@ -32,7 +32,7 @@ final class SnapshotCommand extends Command
 
     protected $description = 'Write an encrypted local snapshot of the current secrets';
 
-    public function handle(DopplerManager $doppler): int
+    public function handle(Doppler $doppler): int
     {
         $options = new SyncOptions(
             token: $this->stringOption('token'),
@@ -57,7 +57,7 @@ final class SnapshotCommand extends Command
             $store->write($secrets, $this->credential($config, $options));
         } catch (DopplerException $e) {
             $this->newLine();
-            $this->error($e->getMessage());
+            $this->error($e->fullMessage());
 
             return $e->exitCode()->value;
         }

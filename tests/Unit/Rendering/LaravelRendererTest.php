@@ -12,6 +12,9 @@ use AlexHackney\Doppler\Rendering\LaravelRenderer;
  * file asserts is the one the whole package rests on: for any value Doppler can hold,
  * parse(render($value)) === $value.
  */
+/**
+ * @return array<string, string> Label to value.
+ */
 function adversarialValues(): array
 {
     return [

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler\Commands;
 
-use AlexHackney\Doppler\DopplerManager;
+use AlexHackney\Doppler\Contracts\Doppler;
 use AlexHackney\Doppler\Exceptions\DopplerException;
 use AlexHackney\Doppler\Exceptions\ValidationFailed;
 use AlexHackney\Doppler\Support\ExitCode;
@@ -37,7 +37,7 @@ final class DiffCommand extends Command
 
     protected $description = 'Report key-level drift between Doppler and the current environment file';
 
-    public function handle(DopplerManager $doppler): int
+    public function handle(Doppler $doppler): int
     {
         $options = new SyncOptions(
             token: $this->stringOption('token'),
@@ -60,7 +60,7 @@ final class DiffCommand extends Command
             return $this->reportValidationFailure($e);
         } catch (DopplerException $e) {
             $this->newLine();
-            $this->error($e->getMessage());
+            $this->error($e->fullMessage());
 
             return $e->exitCode()->value;
         }

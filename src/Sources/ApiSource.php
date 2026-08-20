@@ -7,6 +7,7 @@ namespace AlexHackney\Doppler\Sources;
 use AlexHackney\Doppler\Credentials\Credential;
 use AlexHackney\Doppler\Exceptions\AuthenticationFailed;
 use AlexHackney\Doppler\Exceptions\RateLimited;
+use AlexHackney\Doppler\Exceptions\RequestRejected;
 use AlexHackney\Doppler\Exceptions\SourceUnavailable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -30,6 +31,22 @@ use Throwable;
  */
 final class ApiSource implements SecretSource
 {
+    /**
+     * Identifies this package in Doppler's request logs, so a support conversation about
+     * unexpected traffic has something to name. Deliberately carries no version: it would
+     * have to be hand-maintained here and would be wrong within one release.
+     */
+    private const USER_AGENT = 'alexhackney/laravel-doppler (+https://github.com/alexhackney/laravel-doppler)';
+
+    /**
+     * Longest Retry-After this will actually wait out.
+     *
+     * A sync runs inside a deploy, so an honoured 300-second Retry-After would look exactly
+     * like a hung deploy. Past the cap the request is abandoned and the full value is
+     * reported on the exception instead, where a scheduler can act on it.
+     */
+    private const MAX_RETRY_AFTER_SECONDS = 10;
+
     public function __construct(
         private readonly HttpFactory $http,
         private readonly string $baseUrl = 'https://api.doppler.com/v3',
@@ -102,6 +119,7 @@ final class ApiSource implements SecretSource
                 $response = $this->http
                     ->withToken($credential->reveal())
                     ->accept('application/json')
+                    ->withUserAgent(self::USER_AGENT)
                     ->timeout($this->timeout)
                     ->get($this->baseUrl.'/configs/config/secrets/download', $query);
             } catch (ConnectionException $e) {
@@ -116,7 +134,15 @@ final class ApiSource implements SecretSource
                 return $response;
             }
 
-            $this->pause($attempt, $attempts);
+            // Doppler said how long to wait; ignoring it and retrying on our own schedule
+            // is how a fleet turns one rate limit into a sustained one.
+            $retryAfter = $response->status() === 429 ? $this->retryAfter($response) : null;
+
+            if ($retryAfter !== null && $retryAfter > self::MAX_RETRY_AFTER_SECONDS) {
+                return $response;
+            }
+
+            $this->pause($attempt, $attempts, $retryAfter);
         }
 
         throw SourceUnavailable::network(
@@ -131,9 +157,19 @@ final class ApiSource implements SecretSource
         return $status === 429 || $status >= 500;
     }
 
-    private function pause(int $attempt, int $attempts): void
+    private function pause(int $attempt, int $attempts, ?int $retryAfterSeconds = null): void
     {
-        if ($attempt >= $attempts || $this->retryDelayMs <= 0) {
+        if ($attempt >= $attempts) {
+            return;
+        }
+
+        if ($retryAfterSeconds !== null && $retryAfterSeconds > 0) {
+            usleep($retryAfterSeconds * 1_000_000);
+
+            return;
+        }
+
+        if ($this->retryDelayMs <= 0) {
             return;
         }
 
@@ -161,16 +197,9 @@ final class ApiSource implements SecretSource
         if ($status >= 400) {
             // A 404 on a project or config name, or a 422 on a malformed request. Doppler
             // answered and said no, which is a defect rather than weather, so it must not
-            // be soft-failable. AuthenticationFailed carries the right exit code for
-            // "stop, this will not fix itself".
-            throw new AuthenticationFailed(
-                sprintf(
-                    'Doppler rejected the request (HTTP %d). %s',
-                    $status,
-                    $this->errorMessage($response) ?? 'Check the project and config names.',
-                ),
-                $status,
-            );
+            // be soft-failable — but it is NOT an authentication failure, and reporting it
+            // as one sends an operator off to rotate a token that was just accepted.
+            throw RequestRejected::make($status, $this->errorMessage($response));
         }
     }
 
@@ -214,7 +243,7 @@ final class ApiSource implements SecretSource
     {
         try {
             $decoded = $response->json();
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             throw SourceUnavailable::malformedResponse('the body was not valid JSON');
         }
 
@@ -236,6 +265,10 @@ final class ApiSource implements SecretSource
             $secrets[$key] = match (true) {
                 $value === null => '',
                 is_string($value) => $value,
+                // (string) false is "", which would read as a held-but-unset key and trip
+                // the required rule. "true"/"false" are also what env() converts back to a
+                // real bool, so this is the only casting that survives the round trip.
+                is_bool($value) => $value ? 'true' : 'false',
                 is_scalar($value) => (string) $value,
                 default => throw SourceUnavailable::malformedResponse(
                     sprintf('the value for %s was not a scalar', $key),

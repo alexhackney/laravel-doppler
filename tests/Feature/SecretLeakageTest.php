@@ -136,6 +136,18 @@ it('does not leak the token from an authentication failure', function () {
     assertNoLeak($output);
 });
 
+it('does not leak values or the token from env:snapshot', function () {
+    config()->set('doppler.fallback.enabled', true);
+    config()->set('doppler.fallback.path', $this->path('snapshot.enc'));
+
+    Http::fake(['*' => Http::response(CANARIES)]);
+
+    [$exit, $output] = runCapturing('env:snapshot');
+
+    expect($exit)->toBe(0);
+    assertNoLeak($output);
+});
+
 it('does not leak the token from env:doctor', function () {
     [, $output] = runCapturing('env:doctor');
 

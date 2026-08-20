@@ -15,12 +15,20 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+
+    # Windows is informational until it has been green for a release. The suite carries
+    # seven ->skipOnWindows() tests, so Windows was clearly considered — but no runner has
+    # ever executed it, which means those skips are assumptions rather than facts. Failing
+    # the build on an unproven surface would block a release for a platform nobody deploys
+    # to; reporting on it turns the assumption into evidence. Drop this once it is green.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         # Every cell here was verified to resolve and pass locally before being
         # committed. Laravel 12 requires PHP ^8.2; Laravel 13 requires PHP ^8.3.
         php: ['8.2', '8.3', '8.4', '8.5']
@@ -31,18 +39,33 @@ jobs:
             testbench: '10.*'
           - laravel: '13.*'
             testbench: '11.*'
-          # Lowest-bound run, so an under-constrained dependency fails here rather
-          # than in somebody's application.
+          # Lowest-bound runs, so an under-constrained dependency fails here rather
+          # than in somebody's application. One per supported Laravel major: a constraint
+          # can be under-specified on the 13 path and perfectly fine on the 12 one.
           - php: '8.2'
             laravel: '12.*'
             testbench: '10.*'
             dependency-version: prefer-lowest
+            os: ubuntu-latest
+          - php: '8.3'
+            laravel: '13.*'
+            testbench: '11.*'
+            dependency-version: prefer-lowest
+            os: ubuntu-latest
+          # The one non-Linux cell. Everything this package does to a file — chmod, chown,
+          # flock, atomic rename, POSIX ownership — behaves differently here, and the
+          # guards for that have never been executed.
+          - php: '8.4'
+            laravel: '13.*'
+            testbench: '11.*'
+            dependency-version: prefer-stable
+            os: windows-latest
         exclude:
           # Laravel 13 requires PHP ^8.3.
           - laravel: '13.*'
             php: '8.2'
 
-    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / ${{ matrix.dependency-version }}
+    name: ${{ matrix.os }} / PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / ${{ matrix.dependency-version }}
 
     steps:
       - uses: actions/checkout@v7
@@ -63,7 +86,11 @@ jobs:
           restore-keys: composer-${{ matrix.php }}-${{ matrix.laravel }}-
 
       - name: Install dependencies
+        shell: bash
         run: |
+          # Static-analysis only, and it requires PHP 8.4 + Pest 5, which this matrix
+          # deliberately goes below. Nothing here runs PHPStan, so drop it before resolving.
+          composer remove --dev --no-interaction --no-update pestphp/pest-plugin-phpstan
           composer require --no-interaction --no-update \
             "illuminate/console:${{ matrix.laravel }}" \
             "illuminate/contracts:${{ matrix.laravel }}" \
@@ -74,7 +101,9 @@ jobs:
           composer update --${{ matrix.dependency-version }} --prefer-dist --no-interaction
 
       - name: Show resolved versions
+        shell: bash
         run: composer show --direct
 
       - name: Run tests
+        shell: bash
         run: vendor/bin/pest --ci

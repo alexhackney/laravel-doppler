@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler\Testing;
 
+use AlexHackney\Doppler\Contracts\Doppler;
 use AlexHackney\Doppler\Exceptions\AuthenticationFailed;
 use AlexHackney\Doppler\Exceptions\SourceUnavailable;
+use AlexHackney\Doppler\Snapshot\SnapshotStore;
 use AlexHackney\Doppler\Support\Diff;
 use AlexHackney\Doppler\Support\SyncResult;
 use AlexHackney\Doppler\SyncOptions;
@@ -17,8 +19,13 @@ use PHPUnit\Framework\Assert;
  * The point of shipping this is that an app testing its own deploy path should never have
  * to know what HTTP calls this package makes. Faking at the package boundary means the
  * app's tests keep passing when the package changes how it talks to Doppler.
+ *
+ * It implements the Doppler contract rather than merely quacking like it, because
+ * Facade::swap() rebinds the contract in the container: every type-hinted resolution,
+ * including this package's own artisan commands, has to keep type-checking once a test
+ * calls fake().
  */
-final class Fake
+final class Fake implements Doppler
 {
     /**
      * @var list<SyncOptions>
@@ -92,7 +99,7 @@ final class Fake
         return $this->sync(($options ?? new SyncOptions)->withDryRun());
     }
 
-    public function profile(?string $profile): self
+    public function profile(?string $profile): static
     {
         return $this;
     }
@@ -102,7 +109,52 @@ final class Fake
      */
     public function rawConfig(): array
     {
-        return [];
+        return $this->configuration();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function resolveConfig(SyncOptions $options): array
+    {
+        return $this->configuration();
+    }
+
+    /**
+     * The real store, over the configured path.
+     *
+     * A SnapshotStore touches nothing until it is read from or written to, so handing back
+     * the genuine article keeps `env:doctor` and `env:snapshot` meaningful under a fake
+     * instead of making them report on a null object.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    public function snapshotStore(array $config, SyncOptions $options): SnapshotStore
+    {
+        $path = $options->fallbackPath
+            ?? data_get($config, 'fallback.path', '/etc/doppler/snapshot.enc');
+
+        $passphrase = data_get($config, 'fallback.passphrase');
+
+        return new SnapshotStore(
+            path: is_string($path) ? $path : '/etc/doppler/snapshot.enc',
+            passphrase: is_string($passphrase) ? $passphrase : null,
+        );
+    }
+
+    /**
+     * The application's own doppler config.
+     *
+     * Read lazily through the container rather than captured at construction, because a
+     * test commonly calls fake() first and config()->set() afterwards.
+     *
+     * @return array<string, mixed>
+     */
+    private function configuration(): array
+    {
+        $config = function_exists('config') ? config('doppler', []) : [];
+
+        return is_array($config) ? $config : [];
     }
 
     private function guard(): void

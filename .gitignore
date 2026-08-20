@@ -1,5 +1,12 @@
 /vendor/
 /build/
+
+# A real Doppler token, for the one thing the test suite cannot do: confirming the API
+# response decoder against the live API before 1.0. Never commit one. env:doctor warns
+# about a token file in a work tree that nothing ignores, and this is that line.
+.token
+*.token
+
 composer.lock
 .phpunit.result.cache
 .phpunit.cache

@@ -115,11 +115,35 @@ final class SnapshotStore
         // fail to decrypt during the outage it exists to cover.
         $temp = $this->path.'.'.bin2hex(random_bytes(6)).'.tmp';
 
-        if (@file_put_contents($temp, $payload) === false) {
+        // Create empty, chmod, THEN write. file_put_contents would create the file at the
+        // umask default — typically 0644 — and the payload would land before the chmod,
+        // leaving a real window in which every secret on the box is world readable. It is
+        // encrypted, but SECURITY.md lists a snapshot written with permissions other than
+        // 0600 as a reportable vulnerability, and AtomicWriter already gets this right.
+        $handle = @fopen($temp, 'x');
+
+        if ($handle === false) {
             throw WriteFailed::tempWriteFailed($this->path);
         }
 
         @chmod($temp, 0600);
+
+        $bytes = @fwrite($handle, $payload);
+
+        if ($bytes === false || $bytes !== strlen($payload)) {
+            @fclose($handle);
+            @unlink($temp);
+
+            throw WriteFailed::tempWriteFailed($this->path);
+        }
+
+        @fflush($handle);
+
+        if (function_exists('fsync')) {
+            @fsync($handle);
+        }
+
+        @fclose($handle);
 
         if (! @rename($temp, $this->path)) {
             @unlink($temp);
@@ -190,9 +214,22 @@ final class SnapshotStore
         $secrets = [];
 
         foreach ($decoded as $key => $value) {
-            if (is_string($key) && is_string($value)) {
-                $secrets[$key] = $value;
+            // Refuse rather than skip. Silently dropping a key would hand back a partial
+            // secret set during the outage this file exists to cover, and a partial set
+            // renders and writes cleanly — which is the exact silent-corruption class the
+            // rest of this package refuses by construction.
+            if (! is_string($key) || ! is_string($value)) {
+                throw SourceUnavailable::network(
+                    'snapshot',
+                    sprintf(
+                        '%s decrypted to something that is not a flat map of strings, so it '.
+                        'cannot be trusted as a complete secret set.',
+                        $this->path,
+                    ),
+                );
             }
+
+            $secrets[$key] = $value;
         }
 
         return $secrets;

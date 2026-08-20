@@ -205,3 +205,189 @@ describe('env:doctor', function () {
         $this->artisan('env:doctor')->expectsOutputToContain('Run env:snapshot');
     });
 });
+
+describe('env:doctor, a token file inside a git work tree', function () {
+    beforeEach(function () {
+        // A bare .git directory is all findGitRoot() looks for, and it keeps the test off
+        // the real repository this suite runs inside.
+        mkdir($this->path('.git'));
+    });
+
+    it('warns when nothing ignores it, because it is one `git add .` from being published', function () {
+        $this->artisan('env:doctor')
+            ->expectsOutputToContain('is not ignored by');
+    });
+
+    it('is satisfied by a bare name in .gitignore', function () {
+        $this->file('.gitignore', "/vendor/\n.token\n");
+
+        $this->artisan('env:doctor')->expectsOutputToContain('ignored by');
+    });
+
+    it('is satisfied by a glob in .gitignore', function () {
+        $this->file('.gitignore', "*.token\n");
+
+        $this->artisan('env:doctor')->expectsOutputToContain('ignored by');
+    });
+
+    it('is satisfied by an anchored path in .gitignore', function () {
+        $this->file('.gitignore', "/.token\n");
+
+        $this->artisan('env:doctor')->expectsOutputToContain('ignored by');
+    });
+
+    it('is satisfied by .git/info/exclude, for an operator who will not touch a tracked file', function () {
+        $this->file('.git/info/exclude', "# git ls-files --others --exclude-from=.git/info/exclude\n.token\n");
+
+        $this->artisan('env:doctor')->expectsOutputToContain('ignored by');
+    });
+
+    it('ignores comments and negations rather than reading them as matches', function () {
+        $this->file('.gitignore', "#.token\n!.token\n");
+
+        $this->artisan('env:doctor')->expectsOutputToContain('is not ignored by');
+    });
+
+    it('does not match a same-named file anchored somewhere else in the tree', function () {
+        $this->file('.gitignore', "config/.token\n");
+
+        $this->artisan('env:doctor')->expectsOutputToContain('is not ignored by');
+    });
+});
+
+describe('env:doctor, the files a sync leaves beside the target', function () {
+    beforeEach(function () {
+        mkdir($this->path('.git'));
+        file_put_contents($this->target, "APP_KEY='x'\n");
+    });
+
+    it('warns that the backup holds every previous secret and is not ignored', function () {
+        file_put_contents($this->target.'.backup', "APP_KEY='older'\n");
+
+        $this->artisan('env:doctor')
+            ->expectsOutputToContain('every secret from the previous render');
+    });
+
+    it('warns when the backup is group or world readable', function () {
+        file_put_contents($this->target.'.backup', "APP_KEY='older'\n");
+        chmod($this->target.'.backup', 0644);
+
+        $this->artisan('env:doctor')
+            ->expectsOutputToContain('readable by group or others');
+    })->skipOnWindows();
+
+    it('accepts a backup that .gitignore covers, which is what .backup buys over .bak', function () {
+        file_put_contents($this->target.'.backup', "APP_KEY='older'\n");
+        chmod($this->target.'.backup', 0600);
+        $this->file('.gitignore', ".env\n.env.backup\n.env.lock\n.token\n");
+
+        // Asserts the ignore-specific wording, not the shared description of what the file
+        // holds. That phrase also appears in the permissions warning, so on a platform where
+        // the chmod above is a no-op — Windows — this passed or failed for a reason having
+        // nothing to do with .gitignore.
+        $this->artisan('env:doctor')
+            ->doesntExpectOutputToContain('is not ignored by');
+    });
+
+    it('warns about the lock file, which is permanent and not covered by default', function () {
+        file_put_contents($this->target.'.lock', '');
+
+        $this->artisan('env:doctor')
+            ->expectsOutputToContain('the sync lock');
+    });
+
+    it('says nothing about either when neither exists', function () {
+        Artisan::call('env:doctor');
+
+        expect(Artisan::output())
+            ->not->toContain('every secret from the previous render')
+            ->not->toContain('the sync lock');
+    });
+});
+
+describe('env:doctor, a token file outside any git work tree', function () {
+    it('says nothing about git, because /etc/doppler/.token cannot be committed', function () {
+        Artisan::call('env:doctor');
+
+        $output = Artisan::output();
+
+        expect($output)->not->toContain('ignored by')
+            ->and($output)->not->toContain('git add');
+    });
+});
+
+describe('env:doctor --fix', function () {
+    beforeEach(function () {
+        mkdir($this->path('.git'));
+        file_put_contents($this->target, "APP_KEY='x'\n");
+        file_put_contents($this->target.'.backup', "APP_KEY='older'\n");
+        chmod($this->target.'.backup', 0600);
+        file_put_contents($this->target.'.lock', '');
+    });
+
+    it('appends an anchored entry for every file nothing ignores', function () {
+        Artisan::call('env:doctor', ['--fix' => true]);
+
+        expect(file_get_contents($this->path('.gitignore')))
+            ->toContain('/.token')
+            ->toContain('/.env')
+            ->toContain('/.env.backup')
+            ->toContain('/.env.lock')
+            ->toContain('alexhackney/laravel-doppler');
+    });
+
+    it('creates .gitignore when the repository has none', function () {
+        expect(file_exists($this->path('.gitignore')))->toBeFalse();
+
+        Artisan::call('env:doctor', ['--fix' => true]);
+
+        expect(file_exists($this->path('.gitignore')))->toBeTrue();
+    });
+
+    it('is idempotent, because it only ever adds what the check just proved missing', function () {
+        Artisan::call('env:doctor', ['--fix' => true]);
+        $first = file_get_contents($this->path('.gitignore'));
+
+        Artisan::call('env:doctor', ['--fix' => true]);
+
+        expect(file_get_contents($this->path('.gitignore')))->toBe($first);
+    });
+
+    it('leaves existing entries untouched and does not glue onto a missing final newline', function () {
+        file_put_contents($this->path('.gitignore'), '/vendor');
+
+        Artisan::call('env:doctor', ['--fix' => true]);
+
+        $contents = file_get_contents($this->path('.gitignore'));
+
+        expect($contents)->toStartWith('/vendor')
+            ->and($contents)->toContain("/vendor\n")
+            ->and($contents)->not->toContain('/vendor#');
+    });
+
+    it('adds only what is missing, leaving an already-covered file alone', function () {
+        $this->file('.gitignore', "/.token\n.env\n.env.backup\n");
+
+        Artisan::call('env:doctor', ['--fix' => true]);
+
+        $added = substr_count($this->read($this->path('.gitignore')), '/.token');
+
+        expect($added)->toBe(1)
+            ->and(file_get_contents($this->path('.gitignore')))->toContain('/.env.lock');
+    });
+
+    it('writes nothing without the flag, and names the command that would', function () {
+        Artisan::call('env:doctor');
+
+        expect(file_exists($this->path('.gitignore')))->toBeFalse()
+            ->and(Artisan::output())->toContain('env:doctor --fix');
+    });
+
+    it('says nothing about fixing when everything is already ignored', function () {
+        $this->file('.gitignore', "/.token\n.env\n.env.backup\n.env.lock\n");
+
+        Artisan::call('env:doctor');
+
+        expect(Artisan::output())->not->toContain('env:doctor --fix');
+    });
+});

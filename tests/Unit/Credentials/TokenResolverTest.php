@@ -157,7 +157,7 @@ describe('failure reporting', function () {
     it('lists every location it tried', function () {
         try {
             (new TokenResolver([$this->dir.'/a.token', $this->dir.'/b.token'], 'DOPPLER_TEST_TOKEN'))->resolve();
-            expect(false)->toBeTrue('expected TokenNotFound');
+            $this->fail('expected TokenNotFound');
         } catch (TokenNotFound $e) {
             expect($e->attempted)->toHaveCount(3);
             expect($e->getMessage())->toContain('DOPPLER_TEST_TOKEN');
@@ -171,7 +171,7 @@ describe('failure reporting', function () {
 
         try {
             (new TokenResolver([$this->dir.'/gone.token', $empty], 'DOPPLER_TEST_TOKEN'))->resolve();
-            expect(false)->toBeTrue('expected TokenNotFound');
+            $this->fail('expected TokenNotFound');
         } catch (TokenNotFound $e) {
             expect($e->getMessage())->toContain('does not exist');
             expect($e->getMessage())->toContain('empty or whitespace-only');
@@ -181,7 +181,7 @@ describe('failure reporting', function () {
     it('exits with code 2', function () {
         try {
             (new TokenResolver([], 'DOPPLER_TEST_TOKEN'))->resolve();
-            expect(false)->toBeTrue('expected TokenNotFound');
+            $this->fail('expected TokenNotFound');
         } catch (TokenNotFound $e) {
             expect($e->exitCode()->value)->toBe(2);
             expect($e->isSoftFailable())->toBeFalse();

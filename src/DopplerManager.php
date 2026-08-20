@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler;
 
+use AlexHackney\Doppler\Contracts\Doppler;
 use AlexHackney\Doppler\Credentials\Credential;
 use AlexHackney\Doppler\Credentials\TokenResolver;
 use AlexHackney\Doppler\Exceptions\DopplerException;
@@ -48,7 +49,7 @@ use InvalidArgumentException;
  * Nothing after the validator runs when there are unforced problems, and nothing is
  * written when the round trip fails. Every abort path leaves the previous file untouched.
  */
-final class DopplerManager
+final class DopplerManager implements Doppler
 {
     /**
      * @var array<string, mixed>
@@ -70,7 +71,7 @@ final class DopplerManager
     /**
      * Select a named profile for the next call.
      */
-    public function profile(?string $profile): self
+    public function profile(?string $profile): static
     {
         $clone = new self($this->app, $this->config);
         $clone->activeProfile = $profile;
@@ -168,7 +169,7 @@ final class DopplerManager
     ): SyncResult {
         $secrets = $gathered['secrets'];
 
-        $problems = $this->validate($secrets, $config);
+        $problems = $this->validate($secrets, $config, $targetName);
 
         if ($problems !== [] && ! $options->force) {
             throw ValidationFailed::fromProblems($problems);
@@ -307,7 +308,7 @@ final class DopplerManager
         }
 
         $existingSecrets = $renderer->parse($existing);
-        $problems = $this->validate($existingSecrets, $config);
+        $problems = $this->validate($existingSecrets, $config, $targetName);
 
         if ($problems !== []) {
             throw $this->explainHardFail(
@@ -351,12 +352,7 @@ final class DopplerManager
      */
     private function explainHardFail(DopplerException $exception, string $explanation): DopplerException
     {
-        $class = $exception::class;
-
-        /** @var DopplerException $rethrown */
-        $rethrown = new $class($exception->getMessage()."\n\n".$explanation);
-
-        return $rethrown;
+        return $exception->explain($explanation);
     }
 
     /**
@@ -413,12 +409,13 @@ final class DopplerManager
      * @param  array<string, mixed>  $config
      * @return list<Problem>
      */
-    public function validate(array $secrets, array $config): array
+    public function validate(array $secrets, array $config, string $grammar = 'laravel'): array
     {
         /** @var array<string, mixed> $validateConfig */
         $validateConfig = $this->config($config, 'validate', []);
 
-        return Validator::fromConfig($validateConfig, $this->app->basePath())->validate($secrets);
+        return Validator::fromConfig($validateConfig, $this->app->basePath(), $grammar)
+            ->validate($secrets);
     }
 
     /**

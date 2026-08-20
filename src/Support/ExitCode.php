@@ -36,6 +36,12 @@ enum ExitCode: int
     /** The file was written, but a post-sync hook failed. */
     case HookFailed = 7;
 
+    /**
+     * Doppler answered and rejected the request: a bad project or config name, a malformed
+     * request. Distinct from 4, which means the credential itself was refused.
+     */
+    case RequestRejected = 8;
+
     /** Drift detected. Only ever returned by env:diff and by --dry-run. */
     case DriftDetected = 10;
 
@@ -66,6 +72,7 @@ enum ExitCode: int
             self::RateLimited => 'rate limited',
             self::RoundTripFailed => 'round-trip verification failed',
             self::HookFailed => 'post-sync hook failed',
+            self::RequestRejected => 'request rejected',
             self::DriftDetected => 'drift detected',
         };
     }

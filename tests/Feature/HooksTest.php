@@ -82,6 +82,9 @@ describe('config:cache gating', function () {
         ]);
 
         // Force config:cache to fail by pointing the app at an unwritable cache path.
+        expect($this->app)->not->toBeNull();
+        assert($this->app !== null);
+
         $this->app->useBootstrapPath($this->path('nonexistent-bootstrap'));
 
         $this->artisan('env:sync')->assertExitCode(ExitCode::HookFailed->value);

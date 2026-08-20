@@ -14,7 +14,7 @@ beforeEach(function () {
 
 afterEach(function () {
     // GLOB_BRACE with a leading-dot pattern, because every file this writer creates
-    // (.env, .env.bak, .env.lock) is a dotfile and plain glob('*') misses all of them.
+    // (.env, .env.backup, .env.lock) is a dotfile and plain glob('*') misses all of them.
     foreach (glob($this->dir.'/{,.}[!.,]*', GLOB_BRACE) ?: [] as $file) {
         @unlink($file);
     }
@@ -37,7 +37,10 @@ it('writes with 0600 permissions so secrets are never world-readable', function 
     writer()->write($this->target, "KEY='value'\n");
 
     expect(fileperms($this->target) & 0777)->toBe(0600);
-});
+    // Windows chmod() toggles the read-only attribute and nothing else, so the 0600 is a
+    // silent no-op there and the file reports 0666. Access is an NTFS ACL question this
+    // package does not answer; env:doctor says so rather than implying a mode was applied.
+})->skipOnWindows();
 
 it('leaves no temporary file behind', function () {
     writer()->write($this->target, "KEY='value'\n");
@@ -81,10 +84,10 @@ it('keeps exactly one backup generation', function () {
     file_put_contents($this->target, "FIRST='1'\n");
 
     writer()->write($this->target, "SECOND='2'\n");
-    expect(file_get_contents($this->target.'.bak'))->toBe("FIRST='1'\n");
+    expect(file_get_contents($this->target.'.backup'))->toBe("FIRST='1'\n");
 
     writer()->write($this->target, "THIRD='3'\n");
-    expect(file_get_contents($this->target.'.bak'))->toBe("SECOND='2'\n");
+    expect(file_get_contents($this->target.'.backup'))->toBe("SECOND='2'\n");
 });
 
 it('makes the backup 0600 as well', function () {
@@ -92,7 +95,7 @@ it('makes the backup 0600 as well', function () {
 
     writer()->write($this->target, "SECOND='2'\n");
 
-    expect(fileperms($this->target.'.bak') & 0777)->toBe(0600);
+    expect(fileperms($this->target.'.backup') & 0777)->toBe(0600);
 })->skipOnWindows();
 
 it('skips the backup entirely when disabled', function () {
@@ -100,7 +103,7 @@ it('skips the backup entirely when disabled', function () {
 
     writer(backup: false)->write($this->target, "SECOND='2'\n");
 
-    expect(file_exists($this->target.'.bak'))->toBeFalse();
+    expect(file_exists($this->target.'.backup'))->toBeFalse();
 });
 
 it('short circuits when the content is byte-identical', function () {
@@ -111,8 +114,8 @@ it('short circuits when the content is byte-identical', function () {
     $outcome = writer()->write($this->target, $content);
 
     expect($outcome->written)->toBeFalse();
-    // No backup on a no-op, or every timer tick would churn a .bak file.
-    expect(file_exists($this->target.'.bak'))->toBeFalse();
+    // No backup on a no-op, or every timer tick would churn a .backup file.
+    expect(file_exists($this->target.'.backup'))->toBeFalse();
 
     clearstatcache();
     expect(filemtime($this->target))->toBe($mtime);
@@ -153,6 +156,10 @@ it('replaces the target by rename rather than truncating it in place', function 
 it('refuses a second concurrent write rather than interleaving hooks', function () {
     $lockPath = $this->target.'.lock';
     $handle = fopen($lockPath, 'c');
+
+    expect($handle)->not->toBeFalse();
+    assert(is_resource($handle));
+
     flock($handle, LOCK_EX | LOCK_NB);
 
     try {
@@ -178,6 +185,8 @@ describe('ownership', function () {
         $resolved = (new Ownership([$this->dir.'/missing', $this->target]))->resolve();
 
         expect($resolved)->not->toBeNull();
+        assert($resolved !== null);
+
         expect($resolved['source'])->toBe($this->target);
         expect($resolved['uid'])->toBe(fileowner($this->target));
     });

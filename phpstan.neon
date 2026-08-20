@@ -1,10 +1,21 @@
 includes:
     - vendor/larastan/larastan/extension.neon
+    - vendor/pestphp/pest-plugin-phpstan/extension.neon
 
 parameters:
     level: 8
 
+    # src AND tests, both clean, no baseline.
+    #
+    # Analysing tests needs pestphp/pest-plugin-phpstan, included above: without it PHPStan
+    # resolves $this inside a Pest closure to Pest\PendingCalls\TestCall and every
+    # $this->path() / $this->target is an undefined property — ~370 errors of pure noise.
+    #
+    # That plugin requires PHP 8.4 and Pest 5, which the support matrix (PHP 8.2+, Pest
+    # 3|4|5) cannot demand. It is therefore dev-only and removed in the test matrix jobs;
+    # see .github/workflows/tests.yml. The quality workflow pins 8.4 for this reason.
     paths:
         - src
+        - tests
 
     tmpDir: build/phpstan
