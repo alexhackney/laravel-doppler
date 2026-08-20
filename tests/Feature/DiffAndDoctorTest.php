@@ -281,8 +281,12 @@ describe('env:doctor, the files a sync leaves beside the target', function () {
         chmod($this->target.'.backup', 0600);
         $this->file('.gitignore', ".env\n.env.backup\n.env.lock\n.token\n");
 
+        // Asserts the ignore-specific wording, not the shared description of what the file
+        // holds. That phrase also appears in the permissions warning, so on a platform where
+        // the chmod above is a no-op — Windows — this passed or failed for a reason having
+        // nothing to do with .gitignore.
         $this->artisan('env:doctor')
-            ->doesntExpectOutputToContain('every secret from the previous render');
+            ->doesntExpectOutputToContain('is not ignored by');
     });
 
     it('warns about the lock file, which is permanent and not covered by default', function () {

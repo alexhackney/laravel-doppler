@@ -37,7 +37,10 @@ it('writes with 0600 permissions so secrets are never world-readable', function 
     writer()->write($this->target, "KEY='value'\n");
 
     expect(fileperms($this->target) & 0777)->toBe(0600);
-});
+    // Windows chmod() toggles the read-only attribute and nothing else, so the 0600 is a
+    // silent no-op there and the file reports 0666. Access is an NTFS ACL question this
+    // package does not answer; env:doctor says so rather than implying a mode was applied.
+})->skipOnWindows();
 
 it('leaves no temporary file behind', function () {
     writer()->write($this->target, "KEY='value'\n");

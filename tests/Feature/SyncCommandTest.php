@@ -34,13 +34,15 @@ describe('writing', function () {
             ->toBe("APP_KEY='base64:abc'\nDB_PASSWORD=\"it's #1\"\n");
     });
 
+    // Skipped on Windows for the same reason as the AtomicWriter case: chmod() cannot set
+    // POSIX modes there, so this asserts something the platform cannot do.
     it('writes with 0600 permissions', function () {
         fakeSecrets(['APP_KEY' => 'x']);
 
         $this->artisan('env:sync')->assertExitCode(0);
 
         expect(fileperms($this->target) & 0777)->toBe(0600);
-    });
+    })->skipOnWindows();
 
     it('leaves no temporary file behind', function () {
         fakeSecrets(['APP_KEY' => 'x']);

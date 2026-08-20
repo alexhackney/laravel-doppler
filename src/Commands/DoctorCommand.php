@@ -37,6 +37,21 @@ final class DoctorCommand extends Command
      */
     private array $unignored = [];
 
+    /**
+     * Whether POSIX file modes mean anything on this platform.
+     *
+     * PHP's chmod() on Windows toggles the read-only attribute and nothing else, so a
+     * 0600 request is a silent no-op and the file reports 0666. Access there is governed
+     * by NTFS ACLs, which this package does not set. Saying so is the honest option:
+     * printing "chmod 600 it" on a platform where that cannot work sends an operator
+     * chasing a fix that does not exist, and staying silent lets them assume the mode was
+     * applied when it was not.
+     */
+    private function enforcesFileModes(): bool
+    {
+        return PHP_OS_FAMILY !== 'Windows';
+    }
+
     public function handle(Doppler $doppler): int
     {
         // Reset, because the container hands back the same command instance on a second
@@ -50,6 +65,16 @@ final class DoctorCommand extends Command
         $this->newLine();
         $this->components->info('Doppler doctor. No network calls, no secret values.');
         $this->newLine();
+
+        if (! $this->enforcesFileModes()) {
+            $this->components->warn(
+                'Windows: PHP cannot set POSIX file modes here, so the 0600 this package '.
+                'requests on every file it writes is a no-op and modes below read as 0666. '.
+                'Access is governed by NTFS ACLs, which this package does not set. Treat the '.
+                'directory holding these files as the security boundary.',
+            );
+            $this->newLine();
+        }
 
         // Both checks always run: a broken token and a broken target are independent
         // problems and an operator wants to see both in one pass, not one per run.
@@ -209,7 +234,7 @@ final class DoctorCommand extends Command
 
         $this->components->twoColumnDetail('  permissions', sprintf('0%o', $mode));
 
-        if (($mode & 0077) !== 0) {
+        if (($mode & 0077) !== 0 && $this->enforcesFileModes()) {
             $this->components->warn(sprintf(
                 '  %s is readable by group or others. chmod 600 it.',
                 $path,
@@ -440,7 +465,7 @@ final class DoctorCommand extends Command
 
                 $this->components->twoColumnDetail('  permissions', sprintf('0%o', $mode));
 
-                if (($mode & 0077) !== 0) {
+                if (($mode & 0077) !== 0 && $this->enforcesFileModes()) {
                     $this->components->warn(sprintf(
                         '  %s holds every secret from the previous render and is readable by '.
                         'group or others. chmod 600 it.',

@@ -500,6 +500,11 @@ secrets.
 | `<target>.backup` | Every secret from the **previous** render | `0600` |
 | `<target>.lock` | Nothing. Held during a write so two deploys cannot interleave hooks | `0644` |
 
+Modes are POSIX. On Windows `chmod()` only toggles the read-only attribute, so every mode
+this package sets is a no-op and files report `0666`; access there is an NTFS ACL question
+this package does not answer. `env:doctor` says so rather than letting you assume otherwise.
+See [SECURITY.md](SECURITY.md#windows).
+
 **Add both to your `.gitignore`.** Laravel's application skeleton ships:
 
 ```gitignore

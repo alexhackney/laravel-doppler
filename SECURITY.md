@@ -27,7 +27,7 @@ security problems, not bugs:
 - **Any path that writes the token anywhere**, including a redacted-looking rendering that
   leaks more than the documented `dp.st.****abcd` form.
 - **A rendered file that is world or group readable**, at any point, including the temporary
-  file before the rename.
+  file before the rename. On POSIX systems. See the Windows note below.
 - **A round trip that silently changes a value**, since that can substitute one secret for
   another. The guard exists to make this impossible; a way around it is a vulnerability.
 - **A snapshot that can be decrypted without the token or passphrase**, or that is written
@@ -49,6 +49,23 @@ unusual configuration.
   choices the package can only warn about, and `env:doctor` does. See
   [The token](README.md#the-token) for how to provision one properly.
 - Doppler-side issues. Report those to Doppler.
+
+## Windows
+
+PHP's `chmod()` on Windows toggles the read-only attribute and nothing else, so the `0600`
+this package requests on every file it writes — the target, the temp file, the backup, the
+snapshot — is a **silent no-op**, and those files report `0666`. Access is governed by NTFS
+ACLs, which this package does not set.
+
+That is a platform limitation, not a defect, and it is not a reportable vulnerability. It is
+documented here because the alternative is an operator assuming a mode was applied when it was
+not. `env:doctor` prints a warning on Windows saying exactly this, and suppresses the
+`chmod 600 it` advice that cannot work there.
+
+Treat the directory holding these files as the security boundary on Windows. In practice this
+matters little: this package's job is rendering a `.env` on a deployment target, and those are
+overwhelmingly Linux. Windows is exercised in CI so the limitation stays a known quantity
+rather than an assumption.
 
 ## Hardening the token
 
