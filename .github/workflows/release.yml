@@ -60,7 +60,9 @@ jobs:
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          # 8.4 for the same reason quality.yml pins it: no committed lock file means
+          # this job resolves require-dev, whose floor is pest-plugin-phpstan's 8.4.
+          php-version: '8.4'
           extensions: dom, curl, libxml, mbstring, zip, openssl, posix, fileinfo
           coverage: none
 
