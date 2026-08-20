@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler\Facades;
 
+use AlexHackney\Doppler\Contracts\Doppler as DopplerContract;
 use AlexHackney\Doppler\DopplerManager;
 use AlexHackney\Doppler\SyncOptions;
 use AlexHackney\Doppler\Testing\Fake;
@@ -15,14 +16,22 @@ use Illuminate\Support\Facades\Facade;
  * @method static array<string, string> secrets(?SyncOptions $options = null)
  * @method static DopplerManager profile(?string $profile)
  * @method static array<string, mixed> rawConfig()
+ * @method static array<string, mixed> resolveConfig(SyncOptions $options)
+ * @method static \AlexHackney\Doppler\Snapshot\SnapshotStore snapshotStore(array<string, mixed> $config, SyncOptions $options)
  *
  * @see DopplerManager
  */
 final class Doppler extends Facade
 {
+    /**
+     * The contract, never the concrete manager.
+     *
+     * swap() rebinds whatever this returns, so it has to be the type both the manager and
+     * the fake satisfy, or every type-hinted resolution breaks the moment a test fakes.
+     */
     protected static function getFacadeAccessor(): string
     {
-        return DopplerManager::class;
+        return DopplerContract::class;
     }
 
     /**

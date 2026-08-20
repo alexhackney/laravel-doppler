@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use AlexHackney\Doppler\Contracts\Doppler as DopplerContract;
+use AlexHackney\Doppler\Exceptions\RateLimited;
+use AlexHackney\Doppler\Exceptions\SourceUnavailable;
 use AlexHackney\Doppler\Support\ExitCode;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -224,5 +227,39 @@ describe('soft-fail configuration', function () {
 
         $this->artisan('env:sync', ['--no-soft-fail' => true])
             ->assertExitCode(ExitCode::SourceUnavailable->value);
+    });
+});
+
+describe('a refusal keeps everything the original failure carried', function () {
+    it('preserves the exception type, its typed data and the previous chain', function () {
+        config()->set('doppler.soft_fail', true);
+
+        Http::fake(['*' => Http::response([], 503)]);
+
+        try {
+            app(DopplerContract::class)->sync();
+            $this->fail('expected SourceUnavailable');
+        } catch (SourceUnavailable $e) {
+            // Rebuilding the exception to append the explanation used to null all of this.
+            expect($e->status)->toBe(503)
+                ->and($e->explanation())->toContain('nothing to keep')
+                ->and($e->fullMessage())
+                ->toContain($e->getMessage())
+                ->toContain('nothing to keep');
+        }
+    });
+
+    it('preserves retry-after through a rate-limited refusal', function () {
+        config()->set('doppler.soft_fail', true);
+
+        Http::fake(['*' => Http::response([], 429, ['retry-after' => '17'])]);
+
+        try {
+            app(DopplerContract::class)->sync();
+            $this->fail('expected RateLimited');
+        } catch (RateLimited $e) {
+            expect($e->retryAfter)->toBe(17)
+                ->and($e->explanation())->not->toBeNull();
+        }
     });
 });

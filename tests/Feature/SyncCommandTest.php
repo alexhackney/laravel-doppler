@@ -16,6 +16,9 @@ beforeEach(function () {
     config()->set('doppler.preserve', []);
 });
 
+/**
+ * @param  array<string, string>  $secrets
+ */
 function fakeSecrets(array $secrets): void
 {
     Http::fake(['*' => Http::response($secrets)]);
@@ -54,7 +57,7 @@ describe('writing', function () {
 
         $this->artisan('env:sync')->assertExitCode(0);
 
-        expect(file_get_contents($this->target.'.bak'))->toBe("OLD='value'\n");
+        expect(file_get_contents($this->target.'.backup'))->toBe("OLD='value'\n");
     });
 
     it('does nothing at all when the content is already identical', function () {
@@ -72,7 +75,7 @@ describe('writing', function () {
 
         clearstatcache();
         expect(filemtime($this->target))->toBe($mtime);
-        expect(file_exists($this->target.'.bak'))->toBeFalse();
+        expect(file_exists($this->target.'.backup'))->toBeFalse();
     });
 });
 
@@ -151,6 +154,26 @@ describe('validation', function () {
 });
 
 describe('dry run and stdout', function () {
+    // Found by counting lines of a real 173-key production render: --stdout emitted one
+    // more line than there were keys, because line() appends a newline to content that
+    // already ends in one. `env:sync --stdout > .env` has to produce the bytes the writer
+    // would have produced, or the flag is lying about what it is showing you.
+    it('emits exactly the bytes the writer would have written, with no extra newline', function () {
+        fakeSecrets(['ALPHA' => 'one', 'BETA' => 'two', 'EMPTY' => '']);
+
+        Artisan::call('env:sync', ['--stdout' => true]);
+
+        expect(Artisan::output())->toBe("ALPHA='one'\nBETA='two'\nEMPTY=\n");
+    });
+
+    it('prints one line per key and nothing more', function () {
+        fakeSecrets(['A' => '1', 'B' => '2', 'C' => '3']);
+
+        Artisan::call('env:sync', ['--stdout' => true]);
+
+        expect(substr_count(Artisan::output(), "\n"))->toBe(3);
+    });
+
     it('writes nothing on --dry-run and exits 10 when there is drift', function () {
         file_put_contents($this->target, "OLD='value'\n");
 
@@ -287,7 +310,7 @@ describe('targets', function () {
         $this->artisan('env:sync')->assertExitCode(0);
 
         // The proof that matters is that it loads back to the original bytes.
-        expect(Dotenv\Dotenv::parse(file_get_contents($this->target))['PRIVATE_KEY'])->toBe($pem);
+        expect(Dotenv\Dotenv::parse($this->read($this->target))['PRIVATE_KEY'])->toBe($pem);
     });
 });
 

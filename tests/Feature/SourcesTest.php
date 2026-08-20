@@ -6,6 +6,7 @@ use AlexHackney\Doppler\Credentials\Credential;
 use AlexHackney\Doppler\Exceptions\AuthenticationFailed;
 use AlexHackney\Doppler\Exceptions\DopplerException;
 use AlexHackney\Doppler\Exceptions\RateLimited;
+use AlexHackney\Doppler\Exceptions\RequestRejected;
 use AlexHackney\Doppler\Exceptions\SourceUnavailable;
 use AlexHackney\Doppler\Sources\ApiSource;
 use AlexHackney\Doppler\Sources\CliSource;
@@ -104,10 +105,44 @@ describe('api source', function () {
         expect(apiSource()->fetch(serviceToken()))->toBe(['SET' => 'x', 'HELD_BUT_UNSET' => '']);
     });
 
-    it('normalises null and numeric values to strings', function () {
+    it('normalises null, numeric and boolean values to strings', function () {
         Http::fake(['*' => Http::response(['NULLED' => null, 'PORT' => 5432, 'FLAG' => true])]);
 
-        expect(apiSource()->fetch(serviceToken()))->toBe(['NULLED' => '', 'PORT' => '5432', 'FLAG' => '1']);
+        // FLAG is "true", not "1". (string) false is "", which would read as a
+        // held-but-unset key and trip the required rule on a legitimately false value —
+        // and "true"/"false" are exactly what env() converts back into a real bool.
+        expect(apiSource()->fetch(serviceToken()))
+            ->toBe(['NULLED' => '', 'PORT' => '5432', 'FLAG' => 'true']);
+    });
+
+    it('does not collapse a false value into blankness', function () {
+        Http::fake(['*' => Http::response(['FEATURE_X' => false])]);
+
+        expect(apiSource()->fetch(serviceToken()))->toBe(['FEATURE_X' => 'false']);
+    });
+
+    it('identifies itself to Doppler, so unexpected traffic has a name', function () {
+        Http::fake(['*' => Http::response([])]);
+
+        apiSource()->fetch(serviceToken());
+
+        Http::assertSent(fn ($request) => str_contains(
+            $request->header('User-Agent')[0] ?? '',
+            'alexhackney/laravel-doppler',
+        ));
+    });
+
+    it('abandons a 429 whose Retry-After is longer than a deploy should wait', function () {
+        Http::fake(['*' => Http::response([], 429, ['retry-after' => '600'])]);
+
+        try {
+            apiSource()->fetch(serviceToken());
+            $this->fail('expected RateLimited');
+        } catch (RateLimited $e) {
+            // Reported in full on the exception, so a scheduler can act on it, rather than
+            // slept through inside a deploy that would look hung.
+            expect($e->retryAfter)->toBe(600);
+        }
     });
 
     it('maps each failure status to its own exception and exit code', function (int $status, string $exception, int $exitCode) {
@@ -116,18 +151,37 @@ describe('api source', function () {
         try {
             apiSource()->fetch(serviceToken());
             $this->fail('expected '.$exception);
-        } catch (Throwable $e) {
-            expect($e)->toBeInstanceOf($exception);
+        } catch (DopplerException $e) {
+            // DopplerException, not Throwable: exitCode() is the contract under test, and
+            // catching wider meant asserting a method the caught type does not have.
+            expect($e::class)->toBe($exception);
             expect($e->exitCode()->value)->toBe($exitCode);
         }
     })->with([
         'unauthorized' => [401, AuthenticationFailed::class, 4],
         'forbidden' => [403, AuthenticationFailed::class, 4],
-        'not found' => [404, AuthenticationFailed::class, 4],
+        // 404 and 422 are NOT exit 4. The credential was accepted; the request was not.
+        // Reporting them as authentication failures sent an operator to rotate a token
+        // that was fine, and told a monitor branching on exit codes the same lie.
+        'not found' => [404, RequestRejected::class, 8],
+        'unprocessable' => [422, RequestRejected::class, 8],
         'rate limited' => [429, RateLimited::class, 5],
         'server error' => [500, SourceUnavailable::class, 3],
         'bad gateway' => [502, SourceUnavailable::class, 3],
     ]);
+
+    it('says the token was accepted when the request itself was rejected', function () {
+        Http::fake(['*' => Http::response([], 404)]);
+
+        try {
+            apiSource()->fetch(serviceToken());
+            $this->fail('expected RequestRejected');
+        } catch (RequestRejected $e) {
+            expect($e->getMessage())->toContain('The token itself was accepted')
+                ->and($e->status)->toBe(404)
+                ->and($e->isSoftFailable())->toBeFalse();
+        }
+    });
 
     it('reports retry-after when rate limited', function () {
         Http::fake(['*' => Http::response([], 429, ['retry-after' => '42'])]);
@@ -215,7 +269,7 @@ describe('api source', function () {
 describe('cli source', function () {
     it('downloads JSON with --no-file', function () {
         Process::fake([
-            '*' => Process::result(json_encode(['APP_KEY' => 'from-cli'])),
+            '*' => Process::result(json_encode(['APP_KEY' => 'from-cli'], JSON_THROW_ON_ERROR)),
         ]);
 
         $source = new CliSource(app(ProcessFactory::class), 'doppler', 5);

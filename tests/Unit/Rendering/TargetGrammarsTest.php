@@ -14,6 +14,9 @@ use AlexHackney\Doppler\Rendering\SystemdRenderer;
 /**
  * Values every single-line grammar must carry without corruption.
  */
+/**
+ * @return array<string, string> Label to value.
+ */
 function singleLineValues(): array
 {
     return [

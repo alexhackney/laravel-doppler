@@ -90,7 +90,7 @@ describe('snapshot store', function () {
         $store = new SnapshotStore($this->snapshot);
         $store->write(['A' => 'b'], credential());
 
-        $payload = file_get_contents($this->snapshot);
+        $payload = $this->read($this->snapshot);
         // Flip a byte deep in the ciphertext.
         $payload[strlen($payload) - 1] = chr(ord($payload[strlen($payload) - 1]) ^ 0xFF);
         file_put_contents($this->snapshot, $payload);

@@ -23,8 +23,9 @@ use AlexHackney\Doppler\Exceptions\WriteFailed;
  *   3. chmod 0600 before anything can read it.
  *   4. chown to the intended owner, or a root-owned 0600 file becomes invisible to
  *      php-fpm and every config value silently turns empty.
- *   5. Keep one backup generation, so a bad render can be rolled back by hand mid-incident
- *      without going back to the source.
+ *   5. Keep one backup generation at `<target>.backup`, so a bad render can be rolled back
+ *      by hand mid-incident without going back to the source. `.backup` rather than `.bak`
+ *      because that is the spelling Laravel's own .gitignore already covers.
  *   6. rename() over the target, which is atomic within a filesystem.
  *   7. Verify the result is readable, and report when it is not.
  *
@@ -34,6 +35,19 @@ use AlexHackney\Doppler\Exceptions\WriteFailed;
  */
 final class AtomicWriter
 {
+    /**
+     * Matches the `.env.backup` entry in Laravel's own application .gitignore.
+     */
+    public const BACKUP_SUFFIX = '.backup';
+
+    /**
+     * Held for the duration of a write so two concurrent deploys cannot interleave hooks.
+     *
+     * Deliberately never unlinked: removing a lock file another process is holding open is
+     * how a mutex stops being one.
+     */
+    public const LOCK_SUFFIX = '.lock';
+
     public function __construct(
         private readonly Ownership $ownership,
         private readonly bool $backup = true,
@@ -112,7 +126,7 @@ final class AtomicWriter
      */
     private function acquireLock(string $path)
     {
-        $lockPath = $path.'.lock';
+        $lockPath = $path.self::LOCK_SUFFIX;
 
         $handle = @fopen($lockPath, 'c');
 
@@ -180,6 +194,11 @@ final class AtomicWriter
 
     /**
      * Copy the current target aside, keeping exactly one generation.
+     *
+     * The suffix is `.backup`, not `.bak`, and that is not cosmetic. Laravel's application
+     * skeleton ships a .gitignore listing `.env`, `.env.backup` and `.env.production` with
+     * no wildcard, so `.env.bak` — a file holding every previous production secret — was
+     * committable in a default application. `.backup` is covered for free.
      */
     private function backupExisting(string $path): ?string
     {
@@ -187,7 +206,7 @@ final class AtomicWriter
             return null;
         }
 
-        $backupPath = $path.'.bak';
+        $backupPath = $path.self::BACKUP_SUFFIX;
 
         if (! @copy($path, $backupPath)) {
             // A failed backup must not abort a sync that is otherwise correct and

@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler\Commands;
 
+use AlexHackney\Doppler\Contracts\Doppler;
 use AlexHackney\Doppler\Credentials\TokenResolver;
-use AlexHackney\Doppler\DopplerManager;
 use AlexHackney\Doppler\Exceptions\TokenNotFound;
 use AlexHackney\Doppler\Support\ExitCode;
 use AlexHackney\Doppler\SyncOptions;
+use AlexHackney\Doppler\Writing\AtomicWriter;
 use Illuminate\Console\Command;
 
 /**
@@ -19,12 +20,30 @@ use Illuminate\Console\Command;
  */
 final class DoctorCommand extends Command
 {
-    protected $signature = 'env:doctor {--profile= : Named profile from config/doppler.php}';
+    protected $signature = 'env:doctor
+        {--profile= : Named profile from config/doppler.php}
+        {--fix : Append the missing .gitignore entries for the files this package writes}';
 
     protected $description = 'Diagnose the Doppler setup on this box. No network, no secrets printed';
 
-    public function handle(DopplerManager $doppler): int
+    /**
+     * Secret-bearing files found inside a git work tree that nothing ignores.
+     *
+     * Keyed by git root, because the token can legitimately live in a different repository
+     * from the target — a box serving two sites is the whole reason base_path('.token')
+     * exists — and each root gets its own .gitignore.
+     *
+     * @var array<string, list<string>>
+     */
+    private array $unignored = [];
+
+    public function handle(Doppler $doppler): int
     {
+        // Reset, because the container hands back the same command instance on a second
+        // Artisan::call within one process. Without this a second --fix re-appends every
+        // entry the first one already wrote.
+        $this->unignored = [];
+
         $options = new SyncOptions(profile: $this->stringOption('profile'));
         $config = $doppler->resolveConfig($options);
 
@@ -42,10 +61,95 @@ final class DoctorCommand extends Command
         $this->checkEnvShadowing();
         $this->checkHooks($config);
         $this->checkSnapshot($config, $doppler, $options);
+        $this->reportOrFixIgnores();
 
         $this->newLine();
 
         return $healthy ? ExitCode::Success->value : ExitCode::ValidationFailed->value;
+    }
+
+    /**
+     * Offer, or apply, the .gitignore entries the checks above found missing.
+     *
+     * This is the closest thing to install-time automation that is actually reliable.
+     * Composer runs `scripts` only for the root package, so a library cannot hook its own
+     * installation without shipping a composer-plugin — and since Composer 2.2 a plugin
+     * does nothing at all unless the application separately allow-lists it, so the
+     * "automatic" version would silently not run for most people. An explicit flag on the
+     * command that already found the problem is both simpler and harder to miss.
+     *
+     * Only ever appends, and only entries the ignore check just proved are missing, so it
+     * is idempotent and cannot reorder or drop anything already in the file.
+     */
+    private function reportOrFixIgnores(): void
+    {
+        if ($this->unignored === []) {
+            return;
+        }
+
+        $this->newLine();
+
+        if (! $this->option('fix')) {
+            $this->components->twoColumnDetail(
+                'To fix',
+                'php artisan env:doctor --fix',
+            );
+
+            return;
+        }
+
+        foreach ($this->unignored as $gitDirectory => $paths) {
+            $this->appendIgnoreEntries($gitDirectory, $paths);
+        }
+    }
+
+    /**
+     * @param  list<string>  $paths
+     */
+    private function appendIgnoreEntries(string $gitDirectory, array $paths): void
+    {
+        $file = $gitDirectory.'/.gitignore';
+
+        $entries = [];
+
+        foreach ($paths as $path) {
+            // Anchored to the repository root, so the entry means this exact file and not
+            // any same-named file elsewhere in the tree.
+            $entries[] = '/'.$this->relativeToGitRoot($gitDirectory, $path);
+        }
+
+        $entries = array_values(array_unique($entries));
+
+        $existing = is_file($file) ? @file_get_contents($file) : '';
+
+        if ($existing === false) {
+            $this->components->error(sprintf('  %s exists but could not be read.', $file));
+
+            return;
+        }
+
+        $block = '';
+
+        // A file not ending in a newline would otherwise glue the comment onto whatever
+        // the last line already was.
+        if ($existing !== '' && ! str_ends_with($existing, "\n")) {
+            $block .= "\n";
+        }
+
+        $block .= "\n# alexhackney/laravel-doppler: never commit these\n";
+        $block .= implode("\n", $entries)."\n";
+
+        if (@file_put_contents($file, $block, FILE_APPEND) === false) {
+            $this->components->error(sprintf('  %s could not be written.', $file));
+
+            return;
+        }
+
+        $this->components->info(sprintf('Appended %d entr%s to %s:', count($entries), count($entries) === 1 ? 'y' : 'ies', $file));
+
+        foreach ($entries as $entry) {
+            $this->components->twoColumnDetail('  added', $entry);
+        }
     }
 
     /**
@@ -87,7 +191,7 @@ final class DoctorCommand extends Command
         // being committed, and on a Forge deploy base_path('.token') is exactly that.
         if (is_file($credential->source)) {
             $this->checkTokenFilePermissions($credential->source);
-            $this->checkTokenFileIsIgnored($credential->source);
+            $this->checkFileIsIgnored($credential->source, 'your Doppler token');
         }
 
         return true;
@@ -113,32 +217,117 @@ final class DoctorCommand extends Command
         }
     }
 
-    private function checkTokenFileIsIgnored(string $path): void
+    /**
+     * Warn when a secret-bearing file sits inside a git work tree without being ignored.
+     *
+     * Both file-based sources git reads per repository are consulted: .gitignore, and
+     * .git/info/exclude for an operator who would rather not touch a tracked file. A global
+     * excludes file cannot be resolved from here without shelling out to git, so the warning
+     * names the files that were actually read rather than asserting the file is committable.
+     *
+     * @param  string  $what  What the file is, for the warning text.
+     */
+    private function checkFileIsIgnored(string $path, string $what): bool
     {
-        $directory = dirname($path);
-        $gitDirectory = $this->findGitRoot($directory);
+        $gitDirectory = $this->findGitRoot(dirname($path));
 
         if ($gitDirectory === null) {
-            return;
+            return true;
         }
 
-        $ignoreFile = $gitDirectory.'/.gitignore';
-        $name = basename($path);
+        $sources = [$gitDirectory.'/.gitignore', $gitDirectory.'/.git/info/exclude'];
 
-        $ignored = is_file($ignoreFile)
-            && preg_match('/^\/?'.preg_quote($name, '/').'$/m', (string) @file_get_contents($ignoreFile)) === 1;
+        foreach ($sources as $source) {
+            if ($this->ignores($source, $gitDirectory, $path)) {
+                $this->components->twoColumnDetail('  ignored by', $source);
 
-        if ($ignored) {
-            $this->components->twoColumnDetail('  gitignored', 'yes');
-
-            return;
+                return true;
+            }
         }
 
         $this->components->warn(sprintf(
-            '  %s is inside a git work tree and does not appear in %s. It is one `git add .` from being committed.',
+            '  %s (%s) is inside a git work tree and is not ignored by %s. It is one '.
+            '`git add .` from being committed.',
             $path,
-            $ignoreFile,
+            $what,
+            implode(' or ', $sources),
         ));
+
+        $this->unignored[$gitDirectory][] = $path;
+
+        return false;
+    }
+
+    /**
+     * A path expressed relative to its repository root.
+     *
+     * The git root came from realpath(), so the path has to be resolved the same way or the
+     * prefix will not strip on any box where the checkout sits under a symlink. An atomic
+     * deploy's current -> releases/N is exactly that.
+     */
+    private function relativeToGitRoot(string $gitDirectory, string $path): string
+    {
+        $resolved = realpath($path);
+        $resolved = $resolved === false ? $path : $resolved;
+
+        return str_starts_with($resolved, $gitDirectory.'/')
+            ? substr($resolved, strlen($gitDirectory) + 1)
+            : basename($path);
+    }
+
+    /**
+     * Whether an ignore file carries a pattern matching this token file.
+     *
+     * A deliberate subset of git's grammar, chosen so the failure direction is a spurious
+     * warning rather than a silent "it is ignored" on a file that is not. A pattern with no
+     * slash matches at any depth, so it is tested against the basename; a pattern carrying a
+     * slash is anchored to the repository root, so it is tested against the relative path
+     * with FNM_PATHNAME. Negations are skipped rather than honoured, for the same reason.
+     */
+    private function ignores(string $ignoreFile, string $gitDirectory, string $path): bool
+    {
+        if (! is_file($ignoreFile) || ! is_readable($ignoreFile)) {
+            return false;
+        }
+
+        $contents = @file_get_contents($ignoreFile);
+
+        if ($contents === false) {
+            return false;
+        }
+
+        $name = basename($path);
+        $relative = $this->relativeToGitRoot($gitDirectory, $path);
+
+        foreach (preg_split('/\R/', $contents) ?: [] as $line) {
+            $pattern = trim($line);
+
+            if ($pattern === '' || str_starts_with($pattern, '#') || str_starts_with($pattern, '!')) {
+                continue;
+            }
+
+            $anchored = str_contains(rtrim($pattern, '/'), '/') && ! str_starts_with($pattern, '**/');
+
+            $pattern = rtrim(ltrim($pattern, '/'), '/');
+
+            if (str_starts_with($pattern, '**/')) {
+                $pattern = substr($pattern, 3);
+            }
+
+            if ($pattern === '') {
+                continue;
+            }
+
+            $matched = $anchored
+                ? fnmatch($pattern, $relative, FNM_PATHNAME)
+                : fnmatch($pattern, $name);
+
+            if ($matched) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function findGitRoot(string $directory): ?string
@@ -222,7 +411,53 @@ final class DoctorCommand extends Command
 
         $this->components->twoColumnDetail('  readable now', is_readable($path) ? 'yes' : 'NO');
 
+        $this->checkFileIsIgnored($path, 'your rendered environment file');
+        $this->checkWriteArtefacts($path);
+
         return true;
+    }
+
+    /**
+     * The two files a sync leaves beside the target.
+     *
+     * Worth its own check because neither is obvious from the outside and one of them holds
+     * every secret the previous render did. Laravel's application .gitignore covers
+     * `.env.backup` and `.env.lock` only insofar as they sit next to a `.env` it already
+     * names — point target.path at `config/app.env` and nothing covers either of them.
+     */
+    private function checkWriteArtefacts(string $path): void
+    {
+        $backup = $path.AtomicWriter::BACKUP_SUFFIX;
+
+        if (is_file($backup)) {
+            $this->newLine();
+            $this->components->twoColumnDetail('Backup', $backup);
+
+            $perms = @fileperms($backup);
+
+            if ($perms !== false) {
+                $mode = $perms & 0777;
+
+                $this->components->twoColumnDetail('  permissions', sprintf('0%o', $mode));
+
+                if (($mode & 0077) !== 0) {
+                    $this->components->warn(sprintf(
+                        '  %s holds every secret from the previous render and is readable by '.
+                        'group or others. chmod 600 it.',
+                        $backup,
+                    ));
+                }
+            }
+
+            $this->checkFileIsIgnored($backup, 'every secret from the previous render');
+        }
+
+        $lock = $path.AtomicWriter::LOCK_SUFFIX;
+
+        if (is_file($lock)) {
+            // Empty by design, so this is repository hygiene rather than a leak.
+            $this->checkFileIsIgnored($lock, 'the sync lock, empty but permanent');
+        }
     }
 
     /**
@@ -323,7 +558,7 @@ final class DoctorCommand extends Command
     /**
      * @param  array<string, mixed>  $config
      */
-    private function checkSnapshot(array $config, DopplerManager $doppler, SyncOptions $options): void
+    private function checkSnapshot(array $config, Doppler $doppler, SyncOptions $options): void
     {
         if (! (bool) data_get($config, 'fallback.enabled', false)) {
             return;

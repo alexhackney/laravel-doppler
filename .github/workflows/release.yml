@@ -80,4 +80,11 @@ jobs:
             echo "::error::Development files leaked into the dist archive. Check .gitattributes export-ignore rules."
             exit 1
           fi
+          # A token is gitignored, so it can only reach a tag through `git add -f`. That is
+          # exactly the case .gitignore cannot catch, and publishing one to Packagist is not
+          # something a later commit undoes.
+          if tar -tf /tmp/release-check.tar | grep -Ei '(^|/)[^/]*\.token$'; then
+            echo "::error::A token file is in the dist archive. Revoke it in Doppler now, then remove it from the tag."
+            exit 1
+          fi
           echo "Archive is clean."

@@ -16,12 +16,12 @@ use AlexHackney\Doppler\Exceptions\UnsupportedValue;
  * quiet kind of wrong: the app boots, the password is just subtly incorrect.
  *
  * So this renderer emits values raw, and its only job is refusing what the format cannot
- * carry:
+ * carry: a newline or a carriage return, either of which would be read as the start of a new
+ * assignment.
  *
- *   - a newline, which would be read as the start of a new assignment
- *   - a leading `#` on the whole line, which docker treats as a comment
- *
- * A key containing `=` is impossible here too, but Doppler keys cannot contain one.
+ * Docker's `#` comment rule applies to a line that STARTS with one, so it can only be
+ * triggered by a key beginning with `#`, never by a value. Doppler keys cannot. The same
+ * goes for a key containing `=`.
  */
 final class DockerRenderer implements Renderer
 {

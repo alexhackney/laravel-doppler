@@ -67,8 +67,25 @@ describe('required', function () {
         rmdir($dir);
     });
 
-    it('returns no rules when the example file is missing', function () {
-        expect(RequiredRule::fromExampleFile('/nonexistent/.env.example')->check([]))->toBe([]);
+    // Previously this returned an empty rule set, so a box missing .env.example reported a
+    // clean pass while enforcing nothing — a silent no-op in the rule whose entire job is
+    // catching silence, on exactly the box where the contract mattered most.
+    it('reports the no-op when the example file is missing rather than passing silently', function () {
+        $problems = RequiredRule::fromExampleFile('/nonexistent/.env.example')->check([]);
+
+        expect($problems)->toHaveCount(1)
+            ->and($problems[0]->key)->toBe('.env.example')
+            ->and($problems[0]->describe())
+            ->toContain('no key is being checked at all')
+            ->toContain('silently unenforced');
+    });
+
+    it('carries the no-op report through forGrammar, which rebuilds the rule', function () {
+        $problems = RequiredRule::fromExampleFile('/nonexistent/.env.example')
+            ->forGrammar('systemd')
+            ->check([]);
+
+        expect($problems)->toHaveCount(1);
     });
 });
 
@@ -257,4 +274,48 @@ describe('validator assembly', function () {
     it('rejects a custom rule class that does not exist', function () {
         Validator::fromConfig(['rules' => ['\Not\A\Real\Rule']]);
     })->throws(InvalidArgumentException::class);
+});
+
+describe('required against env()\'s typed literals', function () {
+    // Illuminate\Support\Env::getOption() converts these four before the app sees them.
+    // phpdotenv does not: Dotenv::parse() returns the literal string, which is why the
+    // round-trip guard passes them happily and this rule must not.
+    it('refuses a value env() resolves to nothing, under the laravel grammar', function (string $value) {
+        $problems = Validator::fromConfig(
+            ['required' => ['API_KEY' => 'the client throws on first call']],
+            null,
+            'laravel',
+        )->validate(['API_KEY' => $value]);
+
+        expect($problems)->toHaveCount(1)
+            ->and($problems[0]->key)->toBe('API_KEY')
+            ->and($problems[0]->describe())->toContain('the client throws on first call');
+    })->with(['null', 'NULL', '(null)', 'empty', '(empty)', 'Empty']);
+
+    it('leaves them alone under a grammar with no env() in front of it', function (string $grammar) {
+        $problems = Validator::fromConfig(
+            ['required' => ['API_KEY' => 'x']],
+            null,
+            $grammar,
+        )->validate(['API_KEY' => 'null']);
+
+        expect($problems)->toBe([]);
+    })->with(['systemd', 'docker', 'shell']);
+
+    it('does not refuse a value env() resolves to something real', function (string $value) {
+        $problems = Validator::fromConfig(
+            ['required' => ['FLAG' => 'x']],
+            null,
+            'laravel',
+        )->validate(['FLAG' => $value]);
+
+        expect($problems)->toBe([]);
+    })->with(['false', 'true', '(false)', '0', 'nullish', 'not-null']);
+
+    it('names the value in the refusal, which is safe because it is one of four literals', function () {
+        $problems = Validator::fromConfig(['required' => ['API_KEY' => '']], null, 'laravel')
+            ->validate(['API_KEY' => 'null']);
+
+        expect($problems[0]->describe())->toContain('null')->toContain('env()');
+    });
 });

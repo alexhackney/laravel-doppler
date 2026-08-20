@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace AlexHackney\Doppler\Commands;
 
-use AlexHackney\Doppler\DopplerManager;
+use AlexHackney\Doppler\Contracts\Doppler;
 use AlexHackney\Doppler\Exceptions\DopplerException;
 use AlexHackney\Doppler\Exceptions\HookFailed;
 use AlexHackney\Doppler\Exceptions\ValidationFailed;
@@ -49,7 +49,7 @@ final class SyncCommand extends Command
 
     protected $description = 'Render the environment file from Doppler, atomically and verified';
 
-    public function handle(DopplerManager $doppler): int
+    public function handle(Doppler $doppler): int
     {
         $options = $this->buildOptions();
 
@@ -61,18 +61,22 @@ final class SyncCommand extends Command
             return $this->reportValidationFailure($e);
         } catch (HookFailed $e) {
             $this->newLine();
-            $this->error($e->getMessage());
+            $this->error($e->fullMessage());
 
             return ExitCode::HookFailed->value;
         } catch (DopplerException $e) {
             $this->newLine();
-            $this->error($e->getMessage());
+            $this->error($e->fullMessage());
 
             return $e->exitCode()->value;
         }
 
         if ($this->option('stdout')) {
-            $this->line($result->renderedContent ?? '');
+            // write(), not line(): the rendered content already ends in a newline, and
+            // line() would add a second one. --stdout exists so `env:sync --stdout > .env`
+            // produces the same bytes the writer would have produced, and a package that
+            // sells byte-identity should not be off by a trailing blank line.
+            $this->output->write($result->renderedContent ?? '');
 
             return ExitCode::Success->value;
         }
@@ -247,7 +251,7 @@ final class SyncCommand extends Command
     private function reportValidationFailure(ValidationFailed $e): int
     {
         $this->newLine();
-        $this->error($e->getMessage());
+        $this->error($e->fullMessage());
         $this->newLine();
 
         foreach ($e->problems as $problem) {
