@@ -5,6 +5,17 @@ All notable changes to `alexhackney/laravel-doppler` will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/alexhackney/laravel-doppler/compare/v0.2.0...v0.3.0) (2026-08-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* bind a Doppler contract, rename the backup file, split request rejection from auth failure ([#3](https://github.com/alexhackney/laravel-doppler/issues/3))
+
+### Added
+
+* bind a Doppler contract, rename the backup file, split request rejection from auth failure ([#3](https://github.com/alexhackney/laravel-doppler/issues/3)) ([b21751a](https://github.com/alexhackney/laravel-doppler/commit/b21751affec791de922bec2b464ca5f883c21247))
+
 ## [0.2.0](https://github.com/alexhackney/laravel-doppler/compare/v0.1.0...v0.2.0) (2026-08-12)
 
 ### Added
